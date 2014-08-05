@@ -1,0 +1,370 @@
+#!/bin/bash
+# AWStats Updater 1.2 (build 20140806)
+# Copyright (C) 2011-2014  Daniel Rudolf <www.daniel-rudolf.de>
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License only.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# See <http://www.gnu.org/licenses/> to receive a full-text-copy of
+# the GNU General Public License.
+
+APP_NAME="$(basename "$0")"
+
+BUILD="20140806"
+VERSION="1.2"
+
+# usage
+function showUsage() {
+	echo "Usage:"
+	echo "	$APP_NAME [OPTION]... [--update] [--rebuild|--rebuild-all]"
+}
+
+# parse options
+WWW_PATH="/var/cache/awstats/www"
+UPDATE="yes"
+REBUILD="current"
+VERBOSE=1
+
+while [ $# -gt 0 ]; do
+	if [ "$1" == "--www-path" ]; then
+		if [ $# -lt 2 ]; then
+			echo "$APP_NAME: Invalid \`--www-path': No path given" >&2
+			showUsage
+			exit 1
+		elif [ ! -e "$2" ]; then
+			echo "$APP_NAME: Invalid \`--www-path': $2: No such file or directory" >&2
+			exit 1
+		elif [ ! -d "$2" ]; then
+			echo "$APP_NAME: Invalid \`--www-path': $2: Not a directory" >&2
+			exit 1
+		fi
+
+		WWW_PATH="$2"
+		shift 2
+
+	elif [ "$1" == "--update" ]; then
+		UPDATE="yes"
+		shift
+
+	elif [ "$1" == "--no-update" ]; then
+		UPDATE="no"
+		shift
+
+	elif [ "$1" == "--rebuild" ]; then
+		REBUILD="current"
+		shift
+
+	elif [ "$1" == "--no-rebuild" ]; then
+		REBUILD="no"
+		shift
+
+	elif [ "$1" == "--rebuild-all" ]; then
+		REBUILD="all"
+		shift
+
+	elif [ "$1" == "--verbose" ]; then
+		((VERBOSE++))
+		shift
+
+	elif [ "$1" == "--quiet" ]; then
+		((VERBOSE--))
+		shift
+
+	elif [ "$1" == "--help" ]; then
+		showUsage
+		echo
+		echo "Update AWStats database and/or generate HTML pages. By default, $APP_NAME"
+		echo "updates the database (\`--update') and creates HTML pages (\`--rebuild')"
+		echo "for the current month. You can create HTML pages for all historic data"
+		echo "using \`--rebuild-all'."
+		echo
+		echo "Application options:"
+		echo "  --[no-]update      update AWStats database"
+		echo "  --[no-]rebuild     generate static HTML pages (current month only)"
+		echo "  --rebuild-all      generate static HTML pages (all historic data)"
+		echo "  --www-path=PATH    where to store the generated HTML pages?"
+		echo "                     default: /var/cache/awstats/www"
+		echo "  --verbose          increase verbosity"
+		echo "  --quiet            decrease verbosity"
+		echo
+		echo "Help options:"
+		echo "  --help             display this help and exit"
+		echo "  --version          output version information and exit"
+		echo
+		echo "Please report bugs using the contact form at <http://www.daniel-rudolf.de/>"
+		exit 0
+
+	elif [ "$1" == "--version" ]; then
+		echo "awstats-update $VERSION ($BUILD)"
+		echo "Copyright (C) 2014 Daniel Rudolf"
+		echo "License GPLv3: GNU GPL version 3 only <http://gnu.org/licenses/gpl.html>."
+		echo "This is free software: you are free to change and redistribute it."
+		echo "There is NO WARRANTY, to the extent permitted by law."
+		echo
+		echo "Written by Daniel Rudolf <http://www.daniel-rudolf.de/>"
+		exit 0
+
+	else
+		echo "$APP_NAME: Unknown option \`$1'" >&2
+		showUsage
+		exit 1
+	fi
+done
+
+# you must run this as root
+if [ "$(id -u)" -ne "0" ]; then
+	echo "$APP_NAME: You must run this as \`root'" >&2
+	exit 1
+fi
+
+# nothing to do?
+if [ "$UPDATE" == "no" ] && [ "$REBUILD" == "no" ]; then
+	echo "$APP_NAME: You specified \`--no-update' and \`--no-rebuild'; do you really want to do nothing?" >&2
+	exit
+fi
+
+# prepare fds according to verbosity
+# verbosity -1: hide stdout and stderr
+# verbosity 0: print stderr, hide stdout
+[ "$VERBOSE" -le -1 ] && exec 2> /dev/null
+[ "$VERBOSE" -le 0 ] && exec 1> /dev/null
+[ "$VERBOSE" -gt 1 ] && exec 3>&1 || exec 3> /dev/null
+[ "$VERBOSE" -gt 2 ] && exec 4>&1 || exec 4> /dev/null
+
+# perform --update
+if [ "$UPDATE" == "yes" ]; then
+	echo "Perform update..."
+
+	IFS=$'\n'; for FILE in /etc/awstats/awstats.*.*.conf; do
+		REGEX="^\/etc\/awstats\/awstats\.([^\.]+)\.(.+)\.conf$"
+		if ! [[ "$FILE" =~ $REGEX ]]; then
+			echo "$APP_NAME: invalid config file \`$FILE'" >&2
+			exit 1
+		fi
+
+		# get host and host type
+		HOST_TYPE="$(echo "$FILE" | sed -r "s/$REGEX/\1/")"
+		HOST="$(echo "$FILE" | sed -r "s/$REGEX/\2/")"
+
+		# do it!
+		echo "  - $HOST ($HOST_TYPE)"
+		awstats -config="$HOST_TYPE.$HOST" -update | sed -e 's/^ /  /' | sed -e 's/^/    /' >&4
+	done
+fi
+
+# AWStats pages
+PAGES=( main alldomains allhosts lasthosts unknownip allemails lastemails allemailr lastemailr alllogins lastlogins allrobots lastrobots urldetail urlentry urlexit osdetail browserdetail unknownbrowser unknownos refererse refererpages keyphrases keywords errors404 )
+
+# perform --rebuild
+if [ "$REBUILD" == "current" ]; then
+	# perform rebuild for the current month
+	echo "Generate static HTML pages..."
+
+	IFS=$'\n'; for FILE in /etc/awstats/awstats.*.*.conf; do
+		REGEX="^\/etc\/awstats\/awstats\.([^\.]+)\.(.+)\.conf$"
+		if ! [[ "$FILE" =~ $REGEX ]]; then
+			echo "$APP_NAME: invalid config file \`$FILE'" >&2
+			exit 1
+		fi
+
+		HOST_TYPE="$(echo "$FILE" | sed -r "s/$REGEX/\1/")"
+		HOST="$(echo "$FILE" | sed -r "s/$REGEX/\2/")"
+
+		# get current date
+		MONTH="$(date +%m)"
+		YEAR="$(date +%Y)"
+
+		# let the user know what happens
+		if [ "$VERBOSE" -eq 2 ]; then
+			echo -n "  - $HOST ($HOST_TYPE): " >&3
+		else
+			echo "  - $HOST ($HOST_TYPE)"
+		fi
+
+		# are we at the beginning of a new month?
+		# then we should parse the previous month once again
+		REBUILD_ROUNDS=1
+		if [ "$(date +%-d)" -eq 1 ]; then
+			REBUILD_ROUNDS=2
+		fi
+
+		# generate static HTML pages
+		while [ $REBUILD_ROUNDS -gt 0 ]; do
+			# do we have any data?
+			if [ ! -f "/var/lib/awstats/awstats$MONTH$YEAR.$HOST_TYPE.$HOST.txt" ]; then
+				echo "    - $YEAR-$MONTH: no data; skipping..." >&4
+				[ "$VERBOSE" -eq 2 ] && echo -n "$YEAR-$MONTH (no data) " >&3
+			else
+				# create directories, if necessary
+				if [ ! -d "$WWW_PATH/$HOST_TYPE" ]; then
+					mkdir "$WWW_PATH/$HOST_TYPE"
+				fi
+				if [ ! -d "$WWW_PATH/$HOST_TYPE/$HOST" ]; then
+					mkdir "$WWW_PATH/$HOST_TYPE/$HOST"
+				fi
+				if [ ! -d "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR" ]; then
+					mkdir "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR"
+				fi
+
+				# delete and re-create destination directory
+				if [ -e "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH" ]; then
+					rm -r "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH"
+				fi
+				mkdir "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH"
+
+				# let the user know what happens
+				echo -n "    - $YEAR-$MONTH: " >&4
+				[ "$VERBOSE" -eq 2 ] && echo -n "$YEAR-$MONTH " >&3
+
+				# generate static HTML pages
+				PAGE_INDEX=0
+				PAGE_COUNT=${#PAGES[@]}
+				while [ $PAGE_INDEX -lt $PAGE_COUNT ]; do
+					PAGE=${PAGES[$PAGE_INDEX]}
+					((PAGE_INDEX++))
+
+					echo -n "$PAGE " >&4
+
+					awstats -config="$HOST_TYPE.$HOST" -update \
+						-output="$PAGE" -year="$YEAR" -month="$MONTH" \
+						-staticlinks -lang="de" \
+					> "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
+				done
+
+				# symlink index.html
+				ln -s "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html" "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/index.html"
+
+				echo "" >&4
+			fi
+
+			# prepare next rebuild round
+			((REBUILD_ROUNDS--))
+
+			[ "${MONTH:0:1}" == "0" ] && MONTH="${MONTH:1}"
+			((MONTH--))
+			[ "${#MONTH}" -eq 1 ] && MONTH="0$MONTH"
+
+			if [ $MONTH == "00" ]; then
+				MONTH=12
+				((YEAR--))
+			fi
+		done
+
+		[ "$VERBOSE" -eq 2 ] && echo "" >&3
+	done
+fi
+
+# perform --rebuild-all
+if [ "$REBUILD" == "all" ]; then
+	# collect rebuild data
+	# actually this wouldn't be necessary, but AWStats database files aren't sorted at all
+	# this is just for the sake of a nicer output...
+	echo "Collect rebuild data..."
+
+	REBUILD_DATA=""
+	IFS=$'\n'; for FILE in /var/lib/awstats/awstats*.*.*.txt; do
+		REGEX="^\/var\/lib\/awstats\/awstats([0-9]{2})([0-9]{4})\.([^\.]+)\.(.+)\.txt$"
+		if ! [[ "$FILE" =~ $REGEX ]]; then
+			echo "$APP_NAME: invalid database file \`$FILE'" >&2
+			exit 1
+		fi
+
+		HOST_TYPE="$(echo "$FILE" | sed -r "s/$REGEX/\3/")"
+		HOST="$(echo "$FILE" | sed -r "s/$REGEX/\4/")"
+
+		YEAR="$(echo "$FILE" | sed -r "s/$REGEX/\2/")"
+		MONTH="$(echo "$FILE" | sed -r "s/$REGEX/\1/")"
+
+		REBUILD_DATA="$(echo "$REBUILD_DATA" ; echo "$HOST_TYPE/$HOST/$YEAR/$MONTH")"
+	done
+
+	REBUILD_DATA="$(echo "$REBUILD_DATA" | LC_ALL=C sort)"
+
+	# perform rebuild...
+	echo "Generate static HTML pages..."
+
+	PREVIOUS_HOST=""
+	IGNORE_HOST=""
+	IFS=$'\n'; for DATA in $REBUILD_DATA; do
+		HOST_TYPE="$(echo "$DATA" | cut -d '/' -f 1)"
+		HOST="$(echo "$DATA" | cut -d '/' -f 2)"
+
+		YEAR="$(echo "$DATA" | cut -d '/' -f 3)"
+		MONTH="$(echo "$DATA" | cut -d '/' -f 4)"
+
+		# something is wrong with this host; ignore it!
+		if [ "$IGNORE_HOST" == "$HOST_TYPE/$HOST" ]; then
+			continue
+		fi
+
+		# new host
+		if [ "$PREVIOUS_HOST" != "$HOST_TYPE/$HOST" ]; then
+			[ -n "$PREVIOUS_HOST" ] && [ "$VERBOSE" -eq 2 ] && echo "" >&3
+
+			PREVIOUS_HOST="$HOST_TYPE/$HOST"
+			if [ "$VERBOSE" -eq 2 ]; then
+				echo -n "  - $HOST ($HOST_TYPE): " >&3
+			else
+				echo "  - $HOST ($HOST_TYPE)"
+			fi
+
+			# check for AWStats config file
+			if [ ! -f "/etc/awstats/awstats.$HOST_TYPE.$HOST.conf" ]; then
+				echo "$APP_NAME: database files exist for host $HOST ($HOST_TYPE), but no config file; skipping..." >&2
+				continue
+			fi
+		fi
+
+		# create directories, if necessary
+		if [ ! -d "$WWW_PATH/$HOST_TYPE" ]; then
+			mkdir "$WWW_PATH/$HOST_TYPE"
+		fi
+		if [ ! -d "$WWW_PATH/$HOST_TYPE/$HOST" ]; then
+			mkdir "$WWW_PATH/$HOST_TYPE/$HOST"
+		fi
+		if [ ! -d "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR" ]; then
+			mkdir "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR"
+		fi
+
+		# delete and re-create destination directory
+		if [ -e "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH" ]; then
+			rm -r "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH"
+		fi
+		mkdir "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH"
+
+		# let the user know what happens
+		echo -n "    - $YEAR-$MONTH: " >&4
+		[ "$VERBOSE" -eq 2 ] && echo -n "$YEAR-$MONTH " >&3
+
+		# generate static HTML pages
+		PAGE_INDEX=0
+		PAGE_COUNT=${#PAGES[@]}
+		while [ $PAGE_INDEX -lt $PAGE_COUNT ]; do
+			PAGE=${PAGES[$PAGE_INDEX]}
+			((PAGE_INDEX++))
+
+			echo -n "$PAGE " >&4
+
+			awstats -config="$HOST_TYPE.$HOST" -update \
+				-output="$PAGE" -year="$YEAR" -month="$MONTH" \
+				-staticlinks -lang="de" \
+			> "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
+		done
+
+		# symlink index.html
+		ln -s "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html" "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/index.html"
+
+		echo "" >&4
+	done
+fi
+
+# clean up
+exec 3>&-
+exec 4>&-
+exit 0
