@@ -1,7 +1,32 @@
-AWStats Updater 1.3
+AWStats Updater 2.0
 ===================
 
-Update AWStats databases and/or generate HTML pages. By default, ```awstats-update``` updates the database (```--update```) and creates HTML pages (```--rebuild```) for the current month. You can create HTML pages for all historic data using ```--rebuild-all```.
+Update AWStats database and/or generate static HTML pages, either of the specified or all known hosts. By default, ```awstats-update``` updates the database (```--update```) and creates HTML pages (```--rebuild```) for the current month. You can create HTML pages for all historic data using ```--rebuild-all```.
+
+Usage
+-----
+```shell
+awstats-update [OPTION]...
+awstats-update [OPTION]... CONFIG...
+```
+```CONFIG``` can either be:
+* a absolute path to a config file
+* a relative path to a config file, starting from ```/etc/awstats/```
+* a config spec in the form ```[ HOST_TYPE "/" ] HOST```
+
+```awstats-update``` supports the following options:
+* Help options:
+  * ```-h```, ```--help```: display this help and exit
+  * ```--version```: output version information and exit
+* Application options:
+  * ```--[no-]update```: [don't] update AWStats database
+  * ```--[no-]rebuild```: [don't] generate static HTML pages (current month only)
+  * ```-a```, ```--rebuild-all```: generate static HTML pages (all historic data)
+  * ```-o```, ```--overwrite```: re-create existing HTML pages (with ```--rebuild-all```)
+  * ```--no-config[=CONFIG]```: don't skip domains without a config; use ```CONFIG```, otherwise use default config (with ```--rebuild-all```)
+  * ```--www-path=PATH```: where to store the generated HTML pages? default: ```/var/cache/awstats/www```
+  * ```-v```, ```--verbose```: increase verbosity
+  * ```-q```, ```--quiet```: decrease verbosity
 
 Installation
 ------------
@@ -11,6 +36,10 @@ Installation
 * Create ```/etc/cron.daily/awstats-update``` and ```/usr/local/sbin/awstats-update``` and make them executable
 * Create a distinct config file for each virtual host, e.g. ```/etc/awstats/awstats.example.com.conf``` or ```/etc/awstats/awstats.example.net.conf``` (Tip: AWStats supports ```Include``` statements...)
 * Consider using ```awstats.php``` and ```.htaccess```
+
+Bugs & Problems
+---------------
+Please report bugs using the contact form at [http://www.daniel-rudolf.de/](http://daniel-rudolf.de/contact/)
 
 License & Copyright
 -------------------
