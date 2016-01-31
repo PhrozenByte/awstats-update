@@ -1,4 +1,4 @@
-AWStats Updater 2.0
+AWStats Updater 2.1
 ===================
 
 Update AWStats database and/or generate static HTML pages, either of the specified or all known hosts. By default, ```awstats-update``` updates the database (```--update```) and creates HTML pages (```--rebuild```) for the current month. You can create HTML pages for all historic data using ```--rebuild-all```.
@@ -43,7 +43,7 @@ Please report bugs using the contact form at [http://www.daniel-rudolf.de/](http
 
 License & Copyright
 -------------------
-Copyright (C) 2011-2015  Daniel Rudolf <http://www.daniel-rudolf.de/>
+Copyright (C) 2011-2016  Daniel Rudolf <http://www.daniel-rudolf.de/>
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3 of the License only.
 
