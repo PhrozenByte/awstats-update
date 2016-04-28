@@ -1,5 +1,7 @@
 #!/bin/bash
 # AWStats Updater 2.2 (build 20160428)
+# https://github.com/PhrozenByte/awstats-update
+#
 # Copyright (C) 2011-2016  Daniel Rudolf <www.daniel-rudolf.de>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -157,7 +159,7 @@ while true; do
             echo "  -h, --help                display this help and exit"
             echo "      --version             output version information and exit"
             echo
-            echo "Please report bugs using the contact form at <http://www.daniel-rudolf.de/>"
+            echo "Please report bugs using GitHub <https://github.com/PhrozenByte/awstats-update>"
             exit 0
             ;;
 
