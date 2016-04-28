@@ -1,4 +1,12 @@
 <IfModule mod_env.c>
-  SetEnv AWSTATS_BASE_PATH "/var/cache/awstats/www"
-  SetEnv AWSTATS_TYPES "apache2:AWStats for Apache HTTP/apache2-ssl:AWStats for Apache HTTPS/postfix:AWStats for Postfix Mail"
+    SetEnv AWSTATS_BASE_PATH "/var/cache/awstats/www"
+    SetEnv AWSTATS_TYPES "apache2:AWStats for Apache HTTP/apache2-ssl:AWStats for Apache HTTPS/postfix:AWStats for Postfix Mail"
+</IfModule>
+
+<IfModule mod_negotiation.c>
+    <IfModule mod_mime.c>
+        Options +MultiViews
+        RemoveType .gz
+        AddEncoding gzip .gz
+    </IfModule>
 </IfModule>

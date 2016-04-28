@@ -1,5 +1,5 @@
 #!/bin/bash
-# AWStats Updater 2.1 (build 20160131)
+# AWStats Updater 2.2 (build 20160428)
 # Copyright (C) 2011-2016  Daniel Rudolf <www.daniel-rudolf.de>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -17,8 +17,8 @@
 APP_NAME="$(basename "$0")"
 EXIT_CODE=0
 
-BUILD="20160131"
-VERSION="2.1"
+BUILD="20160428"
+VERSION="2.2"
 
 # usage
 function showUsage() {
@@ -39,7 +39,12 @@ if [ -r "/etc/default/awstats" ]; then
 fi
 
 # use getopt to parse parameters
-if ! OPTIONS="$(getopt -n "$APP_NAME" -o aovqh -l "no-update" -l "update" -l "no-rebuild" -l "rebuild" -l "rebuild-all" -l "overwrite" -l "no-config::" -l "www-path:" -l "verbose" -l "quiet"  -l "help" -l "version" -- "$@")"; then
+if ! OPTIONS="$(
+    getopt -n "$APP_NAME" -o aovqh \
+    -l "no-update" -l "update" -l "no-rebuild" -l "rebuild" -l "rebuild-all" \
+    -l "overwrite" -l "format:" -l "no-config::" -l "www-path:" \
+    -l "verbose" -l "quiet"  -l "help" -l "version" -- "$@"
+)"; then
     showUsage
     exit 1
 fi
@@ -49,6 +54,7 @@ eval set -- "$OPTIONS"
 UPDATE="yes"
 REBUILD="current"
 OVERWRITE="no"
+FORMAT="plain"
 NO_CONFIG=""
 WWW_PATH="/var/cache/awstats/www"
 VERBOSE=1
@@ -83,6 +89,20 @@ while true; do
         "-o"|"--overwrite")
             OVERWRITE="yes"
             shift
+            ;;
+
+        "--format")
+            FORMAT=""
+            IFS=','; for ADD_FORMAT in $2; do
+                if [ "$ADD_FORMAT" == "plain" ] || [ "$ADD_FORMAT" == "gzip" ]; then
+                    [ -z "$FORMAT" ] && FORMAT="$ADD_FORMAT" || FORMAT+=",$ADD_FORMAT"
+                else
+                    echo "$APP_NAME: Invalid argument '$2' for '--format'" >&2
+                    exit 1
+                fi
+            done
+
+            shift 2
             ;;
 
         "--no-config")
@@ -120,13 +140,16 @@ while true; do
             echo "Application options:"
             echo "      --[no-]update         [don't] update AWStats database"
             echo "      --[no-]rebuild        [don't] generate static HTML pages"
-            echo "                            (current month only)"
+            echo "                              (current month only)"
             echo "  -a, --rebuild-all         generate static HTML pages (all historic data)"
             echo "  -o, --overwrite           re-create existing HTML pages (with --rebuild-all)"
+            echo "      --format=FORMAT       output HTML pages according to FORMAT: plain, or"
+            echo "                              gzip.  You also pass both comma separated."
+            echo "                              default: plain"
             echo "      --no-config[=CONFIG]  don't skip domains without a config; use CONFIG,"
-            echo "                            otherwise use default config (with --rebuild-all)"
+            echo "                              otherwise use default config (with --rebuild-all)"
             echo "      --www-path=PATH       where to store the generated HTML pages?"
-            echo "                            default: /var/cache/awstats/www"
+            echo "                              default: /var/cache/awstats/www"
             echo "  -v, --verbose             increase verbosity"
             echo "  -q, --quiet               decrease verbosity"
             echo
@@ -166,6 +189,10 @@ done
 if [ "$UPDATE" == "no" ] && [ "$REBUILD" == "no" ]; then
     echo "$APP_NAME: You specified \`--no-update' and \`--no-rebuild'; do you really want to do nothing?" >&2
     exit 0
+fi
+if [ -z "$FORMAT" ] && [ "$REBUILD" != "no" ]; then
+    echo "$APP_NAME: You specified \'--rebuild' or \'--rebuild-all', but no output format; use \`--format'" >&2
+    exit 1
 fi
 
 # check config dir
@@ -763,6 +790,8 @@ if [ "$REBUILD" != "no" ]; then
     echo "Generating static HTML pages..."
 
     REBUILD_EXIT_CODE=0
+    REBUILD_GZIP_EXIT_CODE=0
+    PREVIOUS_IDENT=""
     PREVIOUS_HOST_TYPE=""
     PREVIOUS_HOST=""
     IGNORE_HOST_TYPE=""
@@ -807,9 +836,15 @@ if [ "$REBUILD" != "no" ]; then
                 fi
             fi
 
-            [ "$REBUILD_EXIT_CODE" -ne 0 ] && echo "  ! $PREVIOUS_HOST ($PREVIOUS_HOST_TYPE) FAILED"
+            if [ "$REBUILD_EXIT_CODE" -ne 0 ]; then
+                echo "  ! $PREVIOUS_IDENT FAILED"
+            elif [ "$REBUILD_GZIP_EXIT_CODE" -ne 0 ]; then
+                echo "  ~ $PREVIOUS_IDENT COMPRESSION FAILED"
+            fi
             REBUILD_EXIT_CODE=0
+            REBUILD_GZIP_EXIT_CODE=0
 
+            PREVIOUS_IDENT="$IDENT"
             PREVIOUS_HOST_TYPE="$HOST_TYPE"
             PREVIOUS_HOST="$HOST"
 
@@ -874,6 +909,7 @@ if [ "$REBUILD" != "no" ]; then
 
         # generate static HTML pages
         ROUND_EXIT_CODE=0
+        ROUND_GZIP_EXIT_CODE=0
         for PAGE in $PAGES; do
             echo -n "$PAGE " >&4
 
@@ -884,7 +920,35 @@ if [ "$REBUILD" != "no" ]; then
                 > "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
             PAGE_EXIT_CODE=$?
 
-            if [ "$PAGE_EXIT_CODE" -ne 0 ]; then
+            if [ "$PAGE_EXIT_CODE" -eq 0 ]; then
+                # create compressed HTML page
+                if [[ ",$FORMAT," == *,gzip,* ]]; then
+                    gzip -c "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html" \
+                        > "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html.gz"
+                    PAGE_GZIP_EXIT_CODE=$?
+
+                    if [ "$PAGE_GZIP_EXIT_CODE" -ne 0 ]; then
+                        # delete invalid compressed file
+                        rm -f "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html.gz"
+
+                        echo -n "[COMPRESSION FAILED with exit code $PAGE_GZIP_EXIT_CODE] " >&4
+                        ROUND_GZIP_EXIT_CODE=1
+                        REBUILD_GZIP_EXIT_CODE=1
+                        EXIT_CODE=1
+
+                        # pass compression error if gzip is the sole output format
+                        if [[ ",$FORMAT," != *,plain,* ]]; then
+                            ROUND_EXIT_CODE=1
+                            REBUILD_EXIT_CODE=1
+                        fi
+                    fi
+                fi
+
+                # remove plain HTML page
+                if [[ ",$FORMAT," != *,plain,* ]]; then
+                    rm -f "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
+                fi
+            else
                 # delete invalid page
                 rm -f "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
 
@@ -898,7 +962,18 @@ if [ "$REBUILD" != "no" ]; then
         echo "" >&4
         if [ "$ROUND_EXIT_CODE" -eq 0 ]; then
             # symlink index.html
-            ln -s "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html" "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/index.html"
+            if [[ ",$FORMAT," == *,plain,* ]]; then
+                ln -s "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html" "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/index.html"
+            fi
+            if [[ ",$FORMAT," == *,gzip,* ]] && [ -f "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html.gz" ]; then
+                ln -s "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html.gz" "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/index.html.gz"
+            fi
+
+            # show compression errors only when the round didn't failed anyway
+            if [ "$ROUND_GZIP_EXIT_CODE" -ne 0 ]; then
+                echo "    ~ $YEAR-$MONTH COMPRESSION FAILED" >&4
+                [ "$VERBOSE" -eq 2 ] && echo -n "[COMPRESSION FAILED] " >&3
+            fi
         else
             # delete empty dir (no pages were built)
             [ -n "$(find "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH" -maxdepth 0 -empty)" ] && rmdir "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH"
@@ -909,7 +984,11 @@ if [ "$REBUILD" != "no" ]; then
     done
 
     [ -n "$PREVIOUS_HOST" ] && [ "$VERBOSE" -eq 2 ] && echo "" >&3
-    [ "$REBUILD_EXIT_CODE" -ne 0 ] && echo "  ! $IDENT FAILED"
+    if [ "$REBUILD_EXIT_CODE" -ne 0 ]; then
+        echo "  ! $IDENT FAILED"
+    elif [ "$REBUILD_GZIP_EXIT_CODE" -ne 0 ]; then
+        echo "  ~ $IDENT COMPRESSION FAILED"
+    fi
 fi
 
 # clean up

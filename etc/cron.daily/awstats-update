@@ -1,2 +1,2 @@
 #!/bin/sh
-/usr/local/sbin/awstats-update --quiet $@
+/usr/local/sbin/awstats-update --quiet "$@"

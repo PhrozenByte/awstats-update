@@ -1,4 +1,4 @@
-AWStats Updater 2.1
+AWStats Updater 2.2
 ===================
 
 Update AWStats database and/or generate static HTML pages, either of the specified or all known hosts. By default, ```awstats-update``` updates the database (```--update```) and creates HTML pages (```--rebuild```) for the current month. You can create HTML pages for all historic data using ```--rebuild-all```.
@@ -23,6 +23,7 @@ awstats-update [OPTION]... CONFIG...
   * ```--[no-]rebuild```: [don't] generate static HTML pages (current month only)
   * ```-a```, ```--rebuild-all```: generate static HTML pages (all historic data)
   * ```-o```, ```--overwrite```: re-create existing HTML pages (with ```--rebuild-all```)
+  * ```--format=FORMAT```: output HTML pages according to ```FORMAT```: ```plain```, or ```gzip```. You also pass both comma separated. default: ```plain```
   * ```--no-config[=CONFIG]```: don't skip domains without a config; use ```CONFIG```, otherwise use default config (with ```--rebuild-all```)
   * ```--www-path=PATH```: where to store the generated HTML pages? default: ```/var/cache/awstats/www```
   * ```-v```, ```--verbose```: increase verbosity
