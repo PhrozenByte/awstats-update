@@ -3,6 +3,8 @@
     if (!defined('BASE_PATH')) {
         if (isset($_SERVER['AWSTATS_BASE_PATH'])) {
             define('BASE_PATH', $_SERVER['AWSTATS_BASE_PATH']);
+        } elseif (isset($_SERVER['REDIRECT__BASE_PATH'])) {
+            define('BASE_PATH', $_SERVER['REDIRECT_AWSTATS_BASE_PATH']);
         } else {
             define('BASE_PATH', __DIR__);
         }
@@ -12,6 +14,8 @@
     if (!defined('TYPES')) {
         if (isset($_SERVER['AWSTATS_TYPES'])) {
             define('TYPES', $_SERVER['AWSTATS_TYPES']);
+        } elseif (isset($_SERVER['REDIRECT_AWSTATS_TYPES'])) {
+            define('TYPES', $_SERVER['REDIRECT_AWSTATS_TYPES']);
         } else {
             define('TYPES', '');
         }
@@ -22,7 +26,7 @@
     $error = array();
 
     // walk through given types
-    if (strpos(TYPES, '/') !== false) {
+    if (TYPES) {
         $types = explode('/', TYPES);
         foreach ($types as $typeData) {
             // types can have a name:description syntax

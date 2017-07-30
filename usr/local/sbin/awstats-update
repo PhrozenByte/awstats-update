@@ -1,8 +1,8 @@
 #!/bin/bash
-# AWStats Updater 2.2 (build 20160428)
+# AWStats Updater 2.3 (build 20170730)
 # https://github.com/PhrozenByte/awstats-update
 #
-# Copyright (C) 2011-2016  Daniel Rudolf <www.daniel-rudolf.de>
+# Copyright (C) 2011-2017  Daniel Rudolf <www.daniel-rudolf.de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,8 +19,8 @@
 APP_NAME="$(basename "$0")"
 EXIT_CODE=0
 
-BUILD="20160428"
-VERSION="2.2"
+BUILD="20170730"
+VERSION="2.3"
 
 # usage
 function showUsage() {
@@ -34,8 +34,11 @@ function showUsage() {
 }
 
 # include debian config
-AWSTATS_NICE=10
+AWSTATS_NICE=""
 AWSTATS_LANG="en"
+AWSTATS_FORMAT="plain"
+AWSTATS_DATA_DIR=""
+AWSTATS_WWW_DIR=""
 if [ -r "/etc/default/awstats" ]; then
     . "/etc/default/awstats"
 fi
@@ -43,8 +46,8 @@ fi
 # use getopt to parse parameters
 if ! OPTIONS="$(
     getopt -n "$APP_NAME" -o aovqh \
-    -l "no-update" -l "update" -l "no-rebuild" -l "rebuild" -l "rebuild-all" \
-    -l "overwrite" -l "format:" -l "no-config::" -l "www-path:" \
+    -l "no-update" -l "update" -l "no-rebuild" -l "rebuild" -l "rebuild-all" -l "overwrite" \
+    -l "no-config::" -l "format:" -l "lang:" -l "data-dir:" -l "www-dir:" -l "standalone:" \
     -l "verbose" -l "quiet"  -l "help" -l "version" -- "$@"
 )"; then
     showUsage
@@ -56,9 +59,9 @@ eval set -- "$OPTIONS"
 UPDATE="yes"
 REBUILD="current"
 OVERWRITE="no"
-FORMAT="plain"
 NO_CONFIG=""
-WWW_PATH="/var/cache/awstats/www"
+CONFIG_DIR=""
+STANDALONE=""
 VERBOSE=1
 
 while true; do
@@ -93,11 +96,20 @@ while true; do
             shift
             ;;
 
+        "--no-config")
+            if [ -n "$2" ]; then
+                NO_CONFIG="$2"
+            else
+                NO_CONFIG="awstats.conf"
+            fi
+            shift 2
+            ;;
+
         "--format")
-            FORMAT=""
+            AWSTATS_FORMAT=""
             IFS=','; for ADD_FORMAT in $2; do
                 if [ "$ADD_FORMAT" == "plain" ] || [ "$ADD_FORMAT" == "gzip" ]; then
-                    [ -z "$FORMAT" ] && FORMAT="$ADD_FORMAT" || FORMAT+=",$ADD_FORMAT"
+                    [ -z "$AWSTATS_FORMAT" ] && AWSTATS_FORMAT="$ADD_FORMAT" || AWSTATS_FORMAT+=",$ADD_FORMAT"
                 else
                     echo "$APP_NAME: Invalid argument '$2' for '--format'" >&2
                     exit 1
@@ -107,17 +119,23 @@ while true; do
             shift 2
             ;;
 
-        "--no-config")
-            if [ -n "$2" ]; then
-                NO_CONFIG="$2"
-            else
-                NO_CONFIG="/etc/awstats/awstats.conf"
-            fi
+        "--lang")
+            AWSTATS_LANG="$2"
             shift 2
             ;;
 
-        "--www-path")
-            WWW_PATH="$2"
+        "--data-dir")
+            AWSTATS_DATA_DIR="$2"
+            shift 2
+            ;;
+
+        "--www-dir")
+            AWSTATS_WWW_DIR="$2"
+            shift 2
+            ;;
+
+        "--standalone")
+            STANDALONE="$2"
             shift 2
             ;;
 
@@ -145,13 +163,18 @@ while true; do
             echo "                              (current month only)"
             echo "  -a, --rebuild-all         generate static HTML pages (all historic data)"
             echo "  -o, --overwrite           re-create existing HTML pages (with --rebuild-all)"
+            echo "      --no-config[=CONFIG]  don't skip domains without a config; use CONFIG,"
+            echo "                              otherwise use default config (with --rebuild-all)"
             echo "      --format=FORMAT       output HTML pages according to FORMAT: plain, or"
             echo "                              gzip.  You also pass both comma separated."
             echo "                              default: plain"
-            echo "      --no-config[=CONFIG]  don't skip domains without a config; use CONFIG,"
-            echo "                              otherwise use default config (with --rebuild-all)"
-            echo "      --www-path=PATH       where to store the generated HTML pages?"
+            echo "      --lang=LANG           output HTML pages using language LANG."
+            echo "                              default: en"
+            echo "      --data-dir=PATH       path to AWStats data directory."
+            echo "                              default: /var/lib/awstats"
+            echo "      --www-dir=PATH        path to AWStats www directory."
             echo "                              default: /var/cache/awstats/www"
+            echo "      --standalone=PATH     path to a standalone \`awstats.pl'"
             echo "  -v, --verbose             increase verbosity"
             echo "  -q, --quiet               decrease verbosity"
             echo
@@ -187,31 +210,59 @@ while true; do
     esac
 done
 
+if [ -n "$STANDALONE" ]; then
+    AWSTATS="$STANDALONE"
+    [ "${AWSTATS:0:1}" == "/" ] || AWSTATS="$PWD/$AWSTATS"
+
+    CONFIG_DIR="$(dirname "$AWSTATS")"
+    [ -z "$AWSTATS_DATA_DIR" ] && AWSTATS_DATA_DIR="$CONFIG_DIR/data"
+    [ -z "$AWSTATS_WWW_DIR" ] && AWSTATS_WWW_DIR="$CONFIG_DIR/www"
+else
+    AWSTATS="$(which "awstats")"
+    CONFIG_DIR="/etc/awstats"
+    [ -z "$AWSTATS_DATA_DIR" ] && AWSTATS_DATA_DIR="/var/lib/awstats"
+    [ -z "$AWSTATS_WWW_DIR" ] && AWSTATS_WWW_DIR="/var/cache/awstats/www"
+fi
+
+# check AWStats executable
+if [ -z "$AWSTATS" ]; then
+    echo "$APP_NAME: AWStats executable not found" >&2
+    exit 1
+elif [ ! -e "$AWSTATS" ]; then
+    echo "$APP_NAME: Invalid AWStats executable \`$AWSTATS': No such file or directory" >&2
+    exit 1
+elif [ ! -f "$AWSTATS" ] || [ ! -x "$AWSTATS" ]; then
+    echo "$APP_NAME: Invalid AWStats executable \`$AWSTATS': Not an executable" >&2
+    exit 1
+fi
+
 # nothing to do?
 if [ "$UPDATE" == "no" ] && [ "$REBUILD" == "no" ]; then
     echo "$APP_NAME: You specified \`--no-update' and \`--no-rebuild'; do you really want to do nothing?" >&2
     exit 0
 fi
-if [ -z "$FORMAT" ] && [ "$REBUILD" != "no" ]; then
+if [ -z "$AWSTATS_FORMAT" ] && [ "$REBUILD" != "no" ]; then
     echo "$APP_NAME: You specified \'--rebuild' or \'--rebuild-all', but no output format; use \`--format'" >&2
     exit 1
 fi
 
-# check config dir
-if [ ! -e "/etc/awstats" ]; then
-    echo "$APP_NAME: Invalid main config dir \`/etc/awstats': No such file or directory" >&2
+# validate --data-dir
+[ "${AWSTATS_DATA_DIR:0:1}" == "/" ] || AWSTATS_DATA_DIR="$PWD/$AWSTATS_DATA_DIR"
+if [ ! -e "$AWSTATS_DATA_DIR" ]; then
+    echo "$APP_NAME: Invalid \`--data-dir': $AWSTATS_DATA_DIR: No such file or directory" >&2
     exit 1
-elif [ ! -d "/etc/awstats" ]; then
-    echo "$APP_NAME: Invalid main config dir \`/etc/awstats': Not a directory" >&2
+elif [ ! -d "$AWSTATS_DATA_DIR" ]; then
+    echo "$APP_NAME: Invalid \`--data-dir': $AWSTATS_DATA_DIR: Not a directory" >&2
     exit 1
 fi
 
-# validate --www path
-if [ ! -e "$WWW_PATH" ]; then
-    echo "$APP_NAME: Invalid \`--www-path': $WWW_PATH: No such file or directory" >&2
+# validate --www-dir
+[ "${AWSTATS_WWW_DIR:0:1}" == "/" ] || AWSTATS_WWW_DIR="$PWD/$AWSTATS_WWW_DIR"
+if [ ! -e "$AWSTATS_WWW_DIR" ]; then
+    echo "$APP_NAME: Invalid \`--www-dir': $AWSTATS_WWW_DIR: No such file or directory" >&2
     exit 1
-elif [ ! -d "$WWW_PATH" ]; then
-    echo "$APP_NAME: Invalid \`--www-path': $WWW_PATH: Not a directory" >&2
+elif [ ! -d "$AWSTATS_WWW_DIR" ]; then
+    echo "$APP_NAME: Invalid \`--www-dir': $AWSTATS_WWW_DIR: Not a directory" >&2
     exit 1
 fi
 
@@ -263,28 +314,28 @@ function resolveConfigPath() {
     [ "$1" == "--soft-fail" ] && shift || SOFT_FAIL="no"
 
     local CHECK_FILE="$1"
-    local CHECK_FILENAME="$(basename "$FILE")"
+    local CHECK_FILENAME="$(basename "$1")"
 
     local FILE=""
     local FILENAME=""
     if [ -z "$CHECK_FILE" ] || [ "$CHECK_FILE" == "[default]" ]; then
         # default config file
-        FILE="/etc/awstats/awstats.conf"
+        FILE="$CONFIG_DIR/awstats.conf"
         FILENAME="awstats.conf"
     elif [ "$CHECK_FILE" == "$CHECK_FILENAME" ]; then
         # filename
         if [ "$CHECK_FILENAME" == "awstats.conf" ] || [[ "$CHECK_FILENAME" =~ ^awstats\.(.+)\.conf$ ]]; then
-            FILE="/etc/awstats/$CHECK_FILENAME"
+            FILE="$CONFIG_DIR/$CHECK_FILENAME"
             FILENAME="$CHECK_FILENAME"
         fi
     elif [ "$CHECK_FILENAME" == "awstats.conf" ] || [[ "$CHECK_FILENAME" =~ ^awstats\.(.+)\.conf$ ]]; then
         # absolute/relative path
-        FILE="/etc/awstats/$CHECK_FILENAME"
+        FILE="$CONFIG_DIR/$CHECK_FILENAME"
         FILENAME="$CHECK_FILENAME"
 
         # get real directory of config file
         local CHECK_DIR="$(dirname "$CHECK_FILE")"
-        [ "${CHECK_DIR:0:1}" != "/" ] && CHECK_DIR="/etc/awstats/$CHECK_DIR"
+        [ "${CHECK_DIR:0:1}" != "/" ] && CHECK_DIR="$CONFIG_DIR/$CHECK_DIR"
 
         CHECK_DIR="$(readlink -f "$CHECK_DIR")"
         if [ -z "$CHECK_DIR" ]; then
@@ -293,14 +344,14 @@ function resolveConfigPath() {
             return 1
         fi
 
-        # file must be in /etc/awstats (can be a symlink)
+        # file must be in $CONFIG_DIR (can be a symlink)
         # we explicitly don't support any other config dirs,
         # awstats handling of them is unbelievable stupid...
-        # if /etc/awstats/awstats.conf exists, it's impossible
+        # if $CONFIG_DIR/awstats.conf exists, it's impossible
         # to use any other directory... wtf?
-        local VALID_DIR="$(readlink -f "/etc/awstats")"
+        local VALID_DIR="$(readlink -f "$CONFIG_DIR")"
         if [ "$CHECK_DIR" != "$VALID_DIR" ]; then
-            echo "$APP_NAME: Invalid config path \`$CHECK_FILE': Config file must be in /etc/awstats" >&2
+            echo "$APP_NAME: Invalid config path \`$CHECK_FILE': Config file must be in \`$CONFIG_DIR'" >&2
             return 1
         fi
     fi
@@ -356,7 +407,7 @@ function resolveConfigSpec() {
     local CONFIG_NAME=""
     if [ "$SPEC" == "/" ]; then
         # default config file
-        CONFIG_FILE="/etc/awstats/awstats.conf"
+        CONFIG_FILE="$CONFIG_DIR/awstats.conf"
     else
         # split HOST_TYPE and HOST
         [[ "$SPEC" == */* ]] && HOST_TYPE="$(echo "$SPEC" | cut -d '/' -f 1)" || HOST_TYPE="*"
@@ -373,7 +424,7 @@ function resolveConfigSpec() {
 
         if [[ "$HOST_TYPE" != *\** ]] && [[ "$HOST" != *\** ]]; then
             # no wildcards, should match a single file
-            CONFIG_FILE="/etc/awstats/awstats$CONFIG_NAME.conf"
+            CONFIG_FILE="$CONFIG_DIR/awstats$CONFIG_NAME.conf"
         else
             # resolve wildcards, probably multiple files
             [ -n "$HOST_TYPE" ] && HOST_TYPE_REGEX="\($(echo "$HOST_TYPE" | sed -e 's/[]\/$*.^|[]/\\&/g' -e 's/\\\*/[^\\.]*/g' -e 's/?/[^\\.]/g')\)\." || HOST_TYPE_REGEX="\(\)"
@@ -381,8 +432,8 @@ function resolveConfigSpec() {
 
             local CONFIGS="$(
                 (
-                    find "/etc/awstats/" -mindepth 1 -maxdepth 1 -type f -name "awstats$CONFIG_NAME.conf" -printf '%f\n'
-                    [ "$NO_CONFIG_MATCH" == "yes" ] && find "/var/lib/awstats/" -mindepth 1 -maxdepth 1 -name "awstats??????$CONFIG_NAME.txt" -printf '%f\n'
+                    find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type f -name "awstats$CONFIG_NAME.conf" -printf '%f\n'
+                    [ "$NO_CONFIG_MATCH" == "yes" ] && find "$AWSTATS_DATA_DIR" -mindepth 1 -maxdepth 1 -name "awstats??????$CONFIG_NAME.txt" -printf '%f\n'
                 ) | sed -n -e "s/^awstats\.${HOST_TYPE_REGEX}${HOST_REGEX}conf$/\1\/\2/p" \
                            -e "s/^awstats[0-9]\{6\}\.${HOST_TYPE_REGEX}${HOST_REGEX}txt$/\1\/\2/p" \
                   | LC_ALL=C sort -u
@@ -405,7 +456,7 @@ function resolveConfigSpec() {
 
     # check single file
     if [ ! -e "$CONFIG_FILE" ]; then
-        if [ "$NO_CONFIG_MATCH" == "no" ] || [ -z "$(find "/var/lib/awstats" -mindepth 1 -maxdepth 1 -name "awstats??????$CONFIG_NAME.txt" -printf "." -quit)" ]; then
+        if [ "$NO_CONFIG_MATCH" == "no" ] || [ -z "$(find "$AWSTATS_DATA_DIR" -mindepth 1 -maxdepth 1 -name "awstats??????$CONFIG_NAME.txt" -printf "." -quit)" ]; then
             echo "$APP_NAME: Invalid config spec \`$SPEC': Resolved to invalid path \`$CONFIG_FILE': No such file or directory" >&2
             return 2
         fi
@@ -421,7 +472,7 @@ function resolveConfigSpec() {
 # validate and resolve --no-config
 # nearly the same as resolveConfig(), but with a preliminary check for arbitrary existing files
 if [ -n "$NO_CONFIG" ]; then
-    [ "${NO_CONFIG:0:1}" == "/" ] && NO_CONFIG_FILE="$NO_CONFIG" || NO_CONFIG_FILE="/etc/awstats/$NO_CONFIG"
+    [ "${NO_CONFIG:0:1}" == "/" ] && NO_CONFIG_FILE="$NO_CONFIG" || NO_CONFIG_FILE="$CONFIG_DIR/$NO_CONFIG"
     if [ -e "$NO_CONFIG_FILE" ]; then
         # step 1: any existing file is sufficient
         if [ ! -f "$NO_CONFIG_FILE" ]; then
@@ -449,19 +500,13 @@ if [ -n "$NO_CONFIG" ]; then
         fi
 
         if [ "$NO_CONFIG_DATA" == "/" ]; then
-            NO_CONFIG="/etc/awstats/awstats.conf"
+            NO_CONFIG="$CONFIG_DIR/awstats.conf"
         elif [ "${NO_CONFIG_DATA:0:1}" == "/" ]; then
-            NO_CONFIG="/etc/awstats/awstats.$(echo "$NO_CONFIG_DATA" | cut -d '/' -f 2).conf"
+            NO_CONFIG="$CONFIG_DIR/awstats.$(echo "$NO_CONFIG_DATA" | cut -d '/' -f 2).conf"
         else
-            NO_CONFIG="/etc/awstats/awstats.$(echo "$NO_CONFIG_DATA" | cut -d '/' -f 1).$(echo "$NO_CONFIG_DATA" | cut -d '/' -f 2).conf"
+            NO_CONFIG="$CONFIG_DIR/awstats.$(echo "$NO_CONFIG_DATA" | cut -d '/' -f 1).$(echo "$NO_CONFIG_DATA" | cut -d '/' -f 2).conf"
         fi
     fi
-fi
-
-# you must run this as root
-if [ "$(id -u)" -ne 0 ]; then
-    echo "$APP_NAME: You must be \`root' to run $APP_NAME" >&2
-    exit 1
 fi
 
 # prepare fds according to verbosity
@@ -497,10 +542,16 @@ if [ "$UPDATE" == "yes" ]; then
         fi
 
         echo "  - $IDENT"
-        nice -n "$AWSTATS_NICE" \
-            awstats -config="$CONFIG_NAME" -update \
+        if [ -n "$AWSTATS_NICE" ]; then
+            nice -n "$AWSTATS_NICE" \
+                "$AWSTATS" -config="$CONFIG_NAME" -update \
+                    | sed -e 's/^ /  /' | sed -e 's/^/    /' >&4
+            UPDATE_EXIT_CODE=$?
+        else
+            "$AWSTATS" -config="$CONFIG_NAME" -update \
                 | sed -e 's/^ /  /' | sed -e 's/^/    /' >&4
-        UPDATE_EXIT_CODE=$?
+            UPDATE_EXIT_CODE=$?
+        fi
 
         if [ "$UPDATE_EXIT_CODE" -ne 0 ]; then
             echo "  ! $IDENT FAILED with exit code $UPDATE_EXIT_CODE"
@@ -529,13 +580,13 @@ if [ "$REBUILD" == "current" ]; then
         # maybe we're at the beginning of a new month... rebuild the previous month
         # if there is no previous month yet, it will be automatically skipped
         if [ -n "$HOST_TYPE" ]; then
-            CONFIG_WWW_PATH="$HOST_TYPE/$HOST"
+            CONFIG_WWW_DIR="$HOST_TYPE/$HOST"
         elif [ -n "$HOST" ]; then
-            CONFIG_WWW_PATH="[none]/$HOST"
+            CONFIG_WWW_DIR="[none]/$HOST"
         else
-            CONFIG_WWW_PATH="[none]/[default]"
+            CONFIG_WWW_DIR="[none]/[default]"
         fi
-        if [ ! -e "$WWW_PATH/$CONFIG_WWW_PATH/$(date +%Y)/$(date +%m)" ]; then
+        if [ ! -e "$AWSTATS_WWW_DIR/$CONFIG_WWW_DIR/$(date +%Y)/$(date +%m)" ]; then
             YEAR="$(date +%Y)"
             MONTH="$(date +%-m)"
 
@@ -564,15 +615,15 @@ if [ "$REBUILD" == "current" ]; then
 elif [ "$REBUILD" == "all" ]; then
     function createTempConfig() {
         if [ $# -eq 2 ]; then
-            local FILE="/etc/awstats/awstats.$1.$2.conf"
+            local FILE="$CONFIG_DIR/awstats.$1.$2.conf"
             local DOMAIN="$2"
             local DOMAIN_ALIASES="$2 www.$2"
         elif [ $# -eq 1 ]; then
-            local FILE="/etc/awstats/awstats.$1.conf"
+            local FILE="$CONFIG_DIR/awstats.$1.conf"
             local DOMAIN="$1"
             local DOMAIN_ALIASES="$1 www.$1"
         else
-            local FILE="/etc/awstats/awstats.conf"
+            local FILE="$CONFIG_DIR/awstats.conf"
             local DOMAIN="localhost"
             local DOMAIN_ALIASES="localhost 127.0.0.1 ::1"
         fi
@@ -619,28 +670,30 @@ elif [ "$REBUILD" == "all" ]; then
 
         if [ -n "$HOST_TYPE" ]; then
             DATA_PATTERN="awstats??????.$HOST_TYPE.$HOST.txt"
-            [ ! -f "/etc/awstats/awstats.$HOST_TYPE.$HOST.conf" ] && createTempConfig "$HOST_TYPE" "$HOST"
+            [ ! -f "$CONFIG_DIR/awstats.$HOST_TYPE.$HOST.conf" ] && createTempConfig "$HOST_TYPE" "$HOST"
             [ $? -ne 0 ] && EXIT_CODE=1 && continue
         elif [ -n "$HOST" ]; then
             DATA_PATTERN="awstats??????.$HOST.txt"
-            [ ! -f "/etc/awstats/awstats.$HOST.conf" ] && createTempConfig "$HOST"
+            [ ! -f "$CONFIG_DIR/awstats.$HOST.conf" ] && createTempConfig "$HOST"
             [ $? -ne 0 ] && EXIT_CODE=1 && continue
         else
             DATA_PATTERN="awstats??????.txt"
-            [ ! -f "/etc/awstats/awstats.conf" ] && createTempConfig
+            [ ! -f "$CONFIG_DIR/awstats.conf" ] && createTempConfig
             [ $? -ne 0 ] && EXIT_CODE=1 && continue
         fi
 
         DATA_EXISTS="no"
         while IFS="" read -r -u 4 -d $'\0' FILE; do
-            REGEX="^\/var\/lib\/awstats\/awstats([0-9]{2})([0-9]{4})(\.(.+))?\.txt$"
-            if ! [[ "$FILE" =~ $REGEX ]]; then
+            FILENAME="$(basename "$FILE")"
+
+            REGEX="^awstats([0-9]{2})([0-9]{4})(\.(.+))?\.txt$"
+            if ! [[ "$FILENAME" =~ $REGEX ]]; then
                 echo "$APP_NAME: Unable to collect rebuild data: Invalid database file \`$FILE'" >&2
                 exit 1
             fi
 
-            YEAR="$(echo "$FILE" | sed -r "s/$REGEX/\2/")"
-            MONTH="$(echo "$FILE" | sed -r "s/$REGEX/\1/")"
+            YEAR="$(echo "$FILENAME" | sed -r "s/$REGEX/\2/")"
+            MONTH="$(echo "$FILENAME" | sed -r "s/$REGEX/\1/")"
 
             REBUILD_DATA="$(echo "$REBUILD_DATA" ; echo "$HOST_TYPE/$HOST/$YEAR/$MONTH")"
             DATA_EXISTS="yes"
@@ -648,7 +701,7 @@ elif [ "$REBUILD" == "all" ]; then
             # add year sum
             echo "$REBUILD_DATA" | grep --fixed-strings --line-regexp -q "$HOST_TYPE/$HOST/$YEAR/all"
             [ $? -eq 0 ] || REBUILD_DATA="$(echo "$REBUILD_DATA" ; echo "$HOST_TYPE/$HOST/$YEAR/all")"
-        done 4< <(find "/var/lib/awstats/" -mindepth 1 -maxdepth 1 -name "$DATA_PATTERN" -print0)
+        done 4< <(find "$AWSTATS_DATA_DIR" -mindepth 1 -maxdepth 1 -name "$DATA_PATTERN" -print0)
 
         if [ "$DATA_EXISTS" == "no" ]; then
             # if no data files were found, add at least the current month
@@ -808,20 +861,20 @@ if [ "$REBUILD" != "no" ]; then
         if [ -n "$HOST_TYPE" ]; then
             IDENT="$HOST ($HOST_TYPE)"
             CONFIG_NAME="$HOST_TYPE.$HOST"
-            CONFIG_FILE="/etc/awstats/awstats.$HOST_TYPE.$HOST.conf"
-            DATA_FILE="/var/lib/awstats/awstats$([ "$MONTH" != "all" ] && echo "$MONTH" || echo "??")$YEAR.$HOST_TYPE.$HOST.txt"
+            CONFIG_FILE="$CONFIG_DIR/awstats.$HOST_TYPE.$HOST.conf"
+            DATA_FILE="$AWSTATS_DATA_DIR/awstats$([ "$MONTH" != "all" ] && echo "$MONTH" || echo "??")$YEAR.$HOST_TYPE.$HOST.txt"
         elif [ -n "$HOST" ]; then
             IDENT="$HOST"
             CONFIG_NAME="$HOST"
-            CONFIG_FILE="/etc/awstats/awstats.$HOST.conf"
-            DATA_FILE="/var/lib/awstats/awstats$([ "$MONTH" != "all" ] && echo "$MONTH" || echo "??")$YEAR.$HOST.txt"
+            CONFIG_FILE="$CONFIG_DIR/awstats.$HOST.conf"
+            DATA_FILE="$AWSTATS_DATA_DIR/awstats$([ "$MONTH" != "all" ] && echo "$MONTH" || echo "??")$YEAR.$HOST.txt"
 
             HOST_TYPE="[none]"
         else
             IDENT="[default]"
             CONFIG_NAME="awstats.conf"
-            CONFIG_FILE="/etc/awstats/awstats.conf"
-            DATA_FILE="/var/lib/awstats/awstats$([ "$MONTH" != "all" ] && echo "$MONTH" || echo "??")$YEAR.txt"
+            CONFIG_FILE="$CONFIG_DIR/awstats.conf"
+            DATA_FILE="$AWSTATS_DATA_DIR/awstats$([ "$MONTH" != "all" ] && echo "$MONTH" || echo "??")$YEAR.txt"
 
             HOST_TYPE="[none]"
             HOST="[default]"
@@ -889,21 +942,21 @@ if [ "$REBUILD" != "no" ]; then
         fi
 
         # create directories, if necessary
-        [ -d "$WWW_PATH/$HOST_TYPE" ] || mkdir "$WWW_PATH/$HOST_TYPE"
-        [ -d "$WWW_PATH/$HOST_TYPE/$HOST" ] || mkdir "$WWW_PATH/$HOST_TYPE/$HOST"
-        [ -d "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR" ] || mkdir "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR"
+        [ -d "$AWSTATS_WWW_DIR/$HOST_TYPE" ] || mkdir "$AWSTATS_WWW_DIR/$HOST_TYPE"
+        [ -d "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST" ] || mkdir "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST"
+        [ -d "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR" ] || mkdir "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR"
 
         # delete and re-create destination directory (either --rebuild or --overwrite specified)
-        if [ -e "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH" ]; then
+        if [ -e "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH" ]; then
             if [ "$OVERWRITE" == "yes" ]; then
-                rm -r "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH"
+                rm -r "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH"
             else
                 echo -n "    ~ $YEAR-$MONTH: exists; skipping..." >&4
                 [ "$VERBOSE" -eq 2 ] && echo -n "$YEAR-$MONTH [exists] " >&3
                 continue
             fi
         fi
-        mkdir "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH"
+        mkdir "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH"
 
         # let the user know what happens
         echo -n "    - $YEAR-$MONTH: " >&4
@@ -915,23 +968,31 @@ if [ "$REBUILD" != "no" ]; then
         for PAGE in $PAGES; do
             echo -n "$PAGE " >&4
 
-            nice -n "$AWSTATS_NICE" \
-                awstats -config="$CONFIG_NAME" \
+            if [ -n "$AWSTATS_NICE" ]; then
+                nice -n "$AWSTATS_NICE" \
+                    "$AWSTATS" -config="$CONFIG_NAME" \
+                        -output="$PAGE" -year="$YEAR" -month="$MONTH" \
+                        -staticlinks -lang="$AWSTATS_LANG" \
+                    > "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
+                PAGE_EXIT_CODE=$?
+            else
+                "$AWSTATS" -config="$CONFIG_NAME" \
                     -output="$PAGE" -year="$YEAR" -month="$MONTH" \
                     -staticlinks -lang="$AWSTATS_LANG" \
-                > "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
-            PAGE_EXIT_CODE=$?
+                > "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
+                PAGE_EXIT_CODE=$?
+            fi
 
             if [ "$PAGE_EXIT_CODE" -eq 0 ]; then
                 # create compressed HTML page
-                if [[ ",$FORMAT," == *,gzip,* ]]; then
-                    gzip -c "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html" \
-                        > "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html.gz"
+                if [[ ",$AWSTATS_FORMAT," == *,gzip,* ]]; then
+                    gzip -c "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html" \
+                        > "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html.gz"
                     PAGE_GZIP_EXIT_CODE=$?
 
                     if [ "$PAGE_GZIP_EXIT_CODE" -ne 0 ]; then
                         # delete invalid compressed file
-                        rm -f "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html.gz"
+                        rm -f "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html.gz"
 
                         echo -n "[COMPRESSION FAILED with exit code $PAGE_GZIP_EXIT_CODE] " >&4
                         ROUND_GZIP_EXIT_CODE=1
@@ -939,7 +1000,7 @@ if [ "$REBUILD" != "no" ]; then
                         EXIT_CODE=1
 
                         # pass compression error if gzip is the sole output format
-                        if [[ ",$FORMAT," != *,plain,* ]]; then
+                        if [[ ",$AWSTATS_FORMAT," != *,plain,* ]]; then
                             ROUND_EXIT_CODE=1
                             REBUILD_EXIT_CODE=1
                         fi
@@ -947,12 +1008,12 @@ if [ "$REBUILD" != "no" ]; then
                 fi
 
                 # remove plain HTML page
-                if [[ ",$FORMAT," != *,plain,* ]]; then
-                    rm -f "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
+                if [[ ",$AWSTATS_FORMAT," != *,plain,* ]]; then
+                    rm -f "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
                 fi
             else
                 # delete invalid page
-                rm -f "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
+                rm -f "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.$PAGE.html"
 
                 echo -n "[FAILED with exit code $PAGE_EXIT_CODE] " >&4
                 ROUND_EXIT_CODE=1
@@ -964,11 +1025,11 @@ if [ "$REBUILD" != "no" ]; then
         echo "" >&4
         if [ "$ROUND_EXIT_CODE" -eq 0 ]; then
             # symlink index.html
-            if [[ ",$FORMAT," == *,plain,* ]]; then
-                ln -s "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html" "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/index.html"
+            if [[ ",$AWSTATS_FORMAT," == *,plain,* ]]; then
+                ln -rs "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html" "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/index.html"
             fi
-            if [[ ",$FORMAT," == *,gzip,* ]] && [ -f "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html.gz" ]; then
-                ln -s "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html.gz" "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH/index.html.gz"
+            if [[ ",$AWSTATS_FORMAT," == *,gzip,* ]] && [ -f "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html.gz" ]; then
+                ln -rs "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/awstats.$HOST_TYPE.$HOST.main.html.gz" "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH/index.html.gz"
             fi
 
             # show compression errors only when the round didn't failed anyway
@@ -978,7 +1039,7 @@ if [ "$REBUILD" != "no" ]; then
             fi
         else
             # delete empty dir (no pages were built)
-            [ -n "$(find "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH" -maxdepth 0 -empty)" ] && rmdir "$WWW_PATH/$HOST_TYPE/$HOST/$YEAR/$MONTH"
+            [ -n "$(find "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH" -maxdepth 0 -empty)" ] && rmdir "$AWSTATS_WWW_DIR/$HOST_TYPE/$HOST/$YEAR/$MONTH"
 
             echo "    ! $YEAR-$MONTH FAILED" >&4
             [ "$VERBOSE" -eq 2 ] && echo -n "[FAILED] " >&3
