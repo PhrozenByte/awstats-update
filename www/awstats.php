@@ -3,7 +3,7 @@
     if (!defined('BASE_PATH')) {
         if (isset($_SERVER['AWSTATS_BASE_PATH'])) {
             define('BASE_PATH', $_SERVER['AWSTATS_BASE_PATH']);
-        } elseif (isset($_SERVER['REDIRECT__BASE_PATH'])) {
+        } elseif (isset($_SERVER['REDIRECT_BASE_PATH'])) {
             define('BASE_PATH', $_SERVER['REDIRECT_AWSTATS_BASE_PATH']);
         } else {
             define('BASE_PATH', __DIR__);

@@ -1,5 +1,5 @@
 #!/bin/bash
-# AWStats Updater 2.3 (build 20170730)
+# AWStats Updater 2.4 (build 20171020)
 # https://github.com/PhrozenByte/awstats-update
 #
 # Copyright (C) 2011-2017  Daniel Rudolf <www.daniel-rudolf.de>
@@ -19,8 +19,8 @@
 APP_NAME="$(basename "$0")"
 EXIT_CODE=0
 
-BUILD="20170730"
-VERSION="2.3"
+BUILD="20171020"
+VERSION="2.4"
 
 # usage
 function showUsage() {
@@ -33,7 +33,7 @@ function showUsage() {
     echo "          - a config spec in the form [ HOST_TYPE \"/\" ] HOST"
 }
 
-# include debian config
+# include Debian config
 AWSTATS_NICE=""
 AWSTATS_LANG="en"
 AWSTATS_FORMAT="plain"
@@ -670,20 +670,29 @@ elif [ "$REBUILD" == "all" ]; then
 
         if [ -n "$HOST_TYPE" ]; then
             DATA_PATTERN="awstats??????.$HOST_TYPE.$HOST.txt"
-            [ ! -f "$CONFIG_DIR/awstats.$HOST_TYPE.$HOST.conf" ] && createTempConfig "$HOST_TYPE" "$HOST"
-            [ $? -ne 0 ] && EXIT_CODE=1 && continue
+            if [ ! -f "$CONFIG_DIR/awstats.$HOST_TYPE.$HOST.conf" ]; then
+                createTempConfig "$HOST_TYPE" "$HOST"
+                [ $? -ne 0 ] && EXIT_CODE=1 && continue
+            fi
         elif [ -n "$HOST" ]; then
             DATA_PATTERN="awstats??????.$HOST.txt"
-            [ ! -f "$CONFIG_DIR/awstats.$HOST.conf" ] && createTempConfig "$HOST"
-            [ $? -ne 0 ] && EXIT_CODE=1 && continue
+            if [ ! -f "$CONFIG_DIR/awstats.$HOST.conf" ]; then
+                createTempConfig "$HOST"
+                [ $? -ne 0 ] && EXIT_CODE=1 && continue
+            fi
         else
             DATA_PATTERN="awstats??????.txt"
-            [ ! -f "$CONFIG_DIR/awstats.conf" ] && createTempConfig
-            [ $? -ne 0 ] && EXIT_CODE=1 && continue
+            if [ ! -f "$CONFIG_DIR/awstats.conf" ]; then
+                createTempConfig
+                [ $? -ne 0 ] && EXIT_CODE=1 && continue
+            fi
         fi
 
+        readarray -t DATA_FILES <<< "$(find "$AWSTATS_DATA_DIR" -mindepth 1 -maxdepth 1 -name "$DATA_PATTERN")"
+        [ ${#DATA_FILES[@]} -ne 1 ] || [ -n "${DATA_FILES[0]}" ] || DATA_FILES=()
+
         DATA_EXISTS="no"
-        while IFS="" read -r -u 4 -d $'\0' FILE; do
+        for FILE in "${DATA_FILES[@]}"; do
             FILENAME="$(basename "$FILE")"
 
             REGEX="^awstats([0-9]{2})([0-9]{4})(\.(.+))?\.txt$"
@@ -701,7 +710,7 @@ elif [ "$REBUILD" == "all" ]; then
             # add year sum
             echo "$REBUILD_DATA" | grep --fixed-strings --line-regexp -q "$HOST_TYPE/$HOST/$YEAR/all"
             [ $? -eq 0 ] || REBUILD_DATA="$(echo "$REBUILD_DATA" ; echo "$HOST_TYPE/$HOST/$YEAR/all")"
-        done 4< <(find "$AWSTATS_DATA_DIR" -mindepth 1 -maxdepth 1 -name "$DATA_PATTERN" -print0)
+        done
 
         if [ "$DATA_EXISTS" == "no" ]; then
             # if no data files were found, add at least the current month
